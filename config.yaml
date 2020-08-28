@@ -1,0 +1,14 @@
+name: lims migration config
+database:
+  new:
+    host: localhost
+    db: lims_new
+    port: 3306
+    username: root
+    password: root
+  old:
+    host: localhost
+    db: lims_old
+    port: 3306
+    username: root
+    password: root
