@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/viper"
@@ -228,6 +229,29 @@ func fillOrderTable() {
 	fmt.Println("订单数据填充完毕")
 }
 
+func replaceFlowID(newID int, oldID []int) {
+	oldIDString := make([]string, len(oldID))
+	for i, v := range oldID {
+		oldIDString[i] = strconv.Itoa(v)
+	}
+	_, err := newConn.Exec(
+		"UPDATE lims_flow_bind_data SET flowid=? WHERE flowid IN (?);",
+		newID, strings.Join(oldIDString, ","))
+	if err != nil {
+		fmt.Printf("替换flow_bind_data流程id错误: %v", err.Error())
+		panic(err.Error())
+	}
+
+	_, orderErr := newConn.Exec(
+		"UPDATE lims_order SET flow_id=? WHERE flow_id IN (?);",
+		newID, strings.Join(oldIDString, ","))
+	if orderErr != nil {
+		fmt.Printf("替换order流程id错误: %v", orderErr.Error())
+		panic(err.Error())
+	}
+	fmt.Println("替换流程id完毕")
+}
+
 //迁移相同结构表
 func sameTableMigrate() {
 	prefix := "lims_"
@@ -259,7 +283,7 @@ func sameTableMigrate() {
 	for _, table := range tables {
 		migrateData(oldConn, prefix+table, newConn, prefix+table)
 	}
-	fmt.Println("旧数据迁移完毕 \n")
+	fmt.Println("旧数据迁移完毕")
 }
 
 func deleteAll() {
@@ -292,11 +316,13 @@ func deleteAll() {
 			fmt.Printf("全部删除出现错误: %v \n", err.Error())
 		}
 	}
-	fmt.Println("删除完毕 \n")
+	fmt.Println("删除完毕")
 }
 
 func main() {
 	// sameTableMigrate()
+	// fillOrderTable()
 	// deleteAll()
-	fillOrderTable()
+	old := []int{54}
+	replaceFlowID(1, old)
 }
