@@ -157,11 +157,75 @@ func migrateData(fromDb *sql.DB, fromTable string, toDb *sql.DB, toTable string)
 		stmStr := fmt.Sprintf("INSERT INTO "+toTable+"%s VALUES %s", columnsString, strings.Join(valueStrings, ","))
 		_, err = toDb.Exec(stmStr, bulkValues...)
 		if err != nil {
+			fmt.Println("错误来自：" + toTable)
 			panic(err.Error())
 		}
 	}
-	fmt.Printf("迁移表 [%s -> %s] 成功，操作%d条数据 \n", fromTable, toTable, count)
+	fmt.Printf("迁移表 [%s] 成功，操作%d条数据 \n", fromTable, count)
 	return count, nil
+}
+
+//填充订单表数据
+func fillOrderTable() {
+	type fillOrderModel struct {
+		ID             int
+		UserID         int
+		BorrowID       int
+		Type           string
+		BorrowRealname string
+		ClassName      string
+		LabName        string
+		LabCode        string
+		EquipName      string
+		EquipModel     string
+	}
+	var fillOrderModels []fillOrderModel
+	rows, err := newConn.Query("SELECT id, userid, borrow_id, type FROM lims_order")
+	if err != nil {
+		fmt.Printf("查询订单列表失败：%v \n", err.Error())
+	}
+
+	for rows.Next() {
+		var order fillOrderModel
+		err = rows.Scan(
+			&order.ID,
+			&order.UserID,
+			&order.BorrowID,
+			&order.Type)
+		if err != nil {
+			fmt.Printf("读取订单记录失败：%v \n", err.Error())
+		}
+		fillOrderModels = append(fillOrderModels, order)
+	}
+	//获取填充数据
+	for i, currOrder := range fillOrderModels {
+		//需优化，这里后面通过IN，一次性查出所有。
+		err = newConn.QueryRow("SELECT realname, className FROM lims_user WHERE id=?", currOrder.UserID).Scan(&fillOrderModels[i].BorrowRealname, &fillOrderModels[i].ClassName)
+		if err != nil {
+			fmt.Printf("读取用户信息失败：%v \n", err.Error())
+		}
+		if currOrder.Type == "lab" {
+			err = newConn.QueryRow(
+				"SELECT lab.name, lab.code FROM lims_flow_bind fb LEFT JOIN lims_lab lab ON fb.bindid=lab.id WHERE fb.id=? AND fb.type='lab'",
+				currOrder.BorrowID).Scan(&fillOrderModels[i].LabName, &fillOrderModels[i].LabCode)
+		} else {
+			err = newConn.QueryRow(
+				"SELECT l.name,l.code,e.name,e.modelname FROM lims_flow_bind fb LEFT JOIN lims_equipments e ON fb.bindid=e.id LEFT JOIN lims_lab l ON e.lab_id=l.id WHERE fb.type='equipments' AND fb.id=?",
+				currOrder.BorrowID).Scan(&fillOrderModels[i].LabName, &fillOrderModels[i].LabCode, &fillOrderModels[i].EquipName, &fillOrderModels[i].EquipModel)
+		}
+	}
+
+	//单条记录慢慢更新
+	for _, currOrder := range fillOrderModels {
+		_, err := newConn.Exec(
+			"UPDATE lims_order SET borrow_realname=?,class_name=?,lab_name=?,lab_code=?,equip_name=?,equip_model=? WHERE id=?",
+			currOrder.BorrowRealname, currOrder.ClassName, currOrder.LabName, currOrder.LabCode, currOrder.EquipName, currOrder.EquipModel, currOrder.ID)
+		if err != nil {
+			fmt.Println("错误来自ID为：" + string(currOrder.ID))
+			panic(err.Error())
+		}
+	}
+	fmt.Println("订单数据填充完毕")
 }
 
 //迁移相同结构表
@@ -174,7 +238,7 @@ func sameTableMigrate() {
 		"equipment_child",
 		"flow_bind",
 		"flow_bind_data",
-		"basesetting",
+		// "basesetting",
 		"blacklist",
 		"blacklist_log",
 		"filepath",
@@ -187,11 +251,15 @@ func sameTableMigrate() {
 		"labs",
 		"message",
 		"order",
+		"order_equipment",
+		"order_log",
+		"record_data",
 	}
 
 	for _, table := range tables {
 		migrateData(oldConn, prefix+table, newConn, prefix+table)
 	}
+	fmt.Println("旧数据迁移完毕 \n")
 }
 
 func deleteAll() {
@@ -207,15 +275,28 @@ func deleteAll() {
 		"delete from lims_blacklist_log;",
 		"delete from lims_filepath;",
 		"delete from lims_flow;",
+		"delete from lims_flow_bind_equipmentdata;",
+		"delete from lims_flow_bind_time;",
+		"delete from lims_flow_node;",
+		"delete from lims_lab_safe_check;",
+		"delete from lims_labs;",
+		"delete from lims_message;",
+		"delete from lims_order;",
+		"delete from lims_order_equipment;",
+		"delete from lims_order_log;",
+		"delete from lims_record_data;",
 	}
 	for _, sql := range deleteAll {
 		_, err := newConn.Query(sql)
 		if err != nil {
-			fmt.Printf("全部删除出现错误: %v", err.Error())
+			fmt.Printf("全部删除出现错误: %v \n", err.Error())
 		}
 	}
+	fmt.Println("删除完毕 \n")
 }
 
 func main() {
-	deleteAll()
+	// sameTableMigrate()
+	// deleteAll()
+	fillOrderTable()
 }
